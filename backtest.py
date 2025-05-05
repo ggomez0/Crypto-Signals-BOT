@@ -1,10 +1,11 @@
 from colorama import Fore, Style
 import pandas as pd
-from bot import SYMBOLS, TIMEFRAME, apply_technical_indicators, get_historical_data, identify_key_levels, analyze_signals, init_exchange, plot_results
+from bot import SYMBOLS, TIMEFRAME, apply_technical_indicators, get_historical_data, identify_key_levels, analyze_signals, init_exchange
+from plt_graph import generate_plt
 
-BACKTEST_MODE = False
-BACKTEST_START_DATE = '2025-03-01'
-BACKTEST_END_DATE = '2025-04-27'
+BACKTEST_MODE = True
+BACKTEST_START_DATE = '2025-05-01'
+BACKTEST_END_DATE = '2025-05-01'
 BACKTEST_RESULTS = []
 
 def run_backtest(exchange, symbol, timeframe, start_date, end_date):
@@ -27,12 +28,13 @@ def run_backtest(exchange, symbol, timeframe, start_date, end_date):
         
         # Filtrar sólo los datos dentro del rango
         filtered_data = [candle for candle in all_data if start_timestamp <= candle[0] <= end_timestamp]
-        
+        print("first good")
         # Convertir a DataFrame
         df = pd.DataFrame(filtered_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
-        
+        print("first good37")
+
         results = []
         signals_count = {'LONG': 0, 'SHORT': 0}
         successful_signals = {'LONG': 0, 'SHORT': 0}
@@ -43,7 +45,8 @@ def run_backtest(exchange, symbol, timeframe, start_date, end_date):
             
             # Calcular indicadores
             current_df = apply_technical_indicators(current_df)
-            
+            print("first good49")
+
             # Identificar soportes/resistencias
             key_levels = identify_key_levels(current_df)
             
@@ -154,7 +157,7 @@ if BACKTEST_MODE:
             df = get_historical_data(exchange, symbol, TIMEFRAME, limit=1000)
             if df is not None:
                 df = apply_technical_indicators(df)
-                plt = plot_results(symbol, df, results_df.to_dict('records'))
+                plt = generate_plt(symbol, df, results_df.to_dict('records'))
                 plt.savefig(f"backtest_results_{symbol.replace('/', '_')}.png")
                 plt.close()
                 print(f"{Fore.GREEN}Gráfico de resultados guardado como backtest_results_{symbol.replace('/', '_')}.png{Style.RESET_ALL}")

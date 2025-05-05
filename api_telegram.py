@@ -5,13 +5,12 @@ from env import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
 from logger_config import logger
 
 TELEGRAM_ENABLED = TELEGRAM_TOKEN is not None and TELEGRAM_CHAT_ID is not None
-if TELEGRAM_ENABLED:
-    print(f"{Fore.GREEN}Alertas Telegram activadas - Envío a chat ID: {TELEGRAM_CHAT_ID}{Style.RESET_ALL}")
-else:
-    print(f"{Fore.YELLOW}Alertas Telegram desactivadas - Configure TELEGRAM_TOKEN y TELEGRAM_CHAT_ID en .env para activar{Style.RESET_ALL}")
     
 def send_telegram_alert(symbol, signal_type, price, explanations, telegram_chatid = TELEGRAM_CHAT_ID):
-    if not TELEGRAM_ENABLED:
+    if TELEGRAM_ENABLED:
+        print(f"{Fore.GREEN}Alertas Telegram activadas - Envío a chat ID: {TELEGRAM_CHAT_ID}{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.YELLOW}Alertas Telegram desactivadas - Configure TELEGRAM_TOKEN y TELEGRAM_CHAT_ID en .env para activar{Style.RESET_ALL}")
         return False
     
     try:

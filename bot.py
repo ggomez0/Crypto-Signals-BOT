@@ -23,7 +23,7 @@ def init_exchange():
         'secret': API_SECRET,
         'enableRateLimit': True,
         'options': {
-            'defaultType': 'future',
+            'defaultType': 'spot',
         }
     })
     return exchange
@@ -35,6 +35,8 @@ def get_historical_data(exchange, symbol, timeframe, limit=500):
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
+        print(f"Datos históricos obtenidos para {symbol} ({len(df)} velas)")
+        #print (df)
         return df
     except Exception as e:
         logger.error(f"Error al obtener datos históricos para {symbol}: {e}")
@@ -45,10 +47,10 @@ def apply_technical_indicators(df):
     # Media móvil simple
     df['sma_fast'] = ta.trend.sma_indicator(df['close'], window=FAST_MA)
     df['sma_slow'] = ta.trend.sma_indicator(df['close'], window=SLOW_MA)
-    
+
     # RSI
     df['rsi'] = ta.momentum.rsi(df['close'], window=RSI_PERIOD)
-    
+
     # MACD
     macd = ta.trend.MACD(df['close'], window_fast=MACD_FAST, window_slow=MACD_SLOW, window_sign=MACD_SIGNAL)
     df['macd'] = macd.macd()
@@ -68,15 +70,22 @@ def apply_technical_indicators(df):
     df['bollinger_mid'] = bollinger.bollinger_mavg()
     
     # Análisis de Volumen
-    df['volume_sma'] = ta.trend.sma_indicator(df['volume'], window=20)
-    df['volume_ratio'] = df['volume'] / df['volume_sma']
-    df['volume_increasing'] = df['volume'] > df['volume'].shift(1)
-    # Detectar tendencia de volumen decreciente (3 periodos consecutivos)
-    df['volume_decreasing_trend'] = (
-        (df['volume'] < df['volume'].shift(1)) & 
-        (df['volume'].shift(1) < df['volume'].shift(2)) & 
-        (df['volume'].shift(2) < df['volume'].shift(3))
-    )
+    if isinstance(df['volume'], pd.Series):
+        df['volume_sma'] = ta.trend.sma_indicator(df['volume'], window=20)
+        df['volume_ratio'] = df['volume'] / df['volume_sma']
+        df['volume_increasing'] = df['volume'] > df['volume'].shift(1)
+        # Detectar tendencia de volumen decreciente (3 periodos consecutivos)
+        df['volume_decreasing_trend'] = (
+            (df['volume'] < df['volume'].shift(1)) & 
+            (df['volume'].shift(1) < df['volume'].shift(2)) & 
+            (df['volume'].shift(2) < df['volume'].shift(3))
+        )
+    else:
+        # If volume is a scalar, set default values
+        df['volume_sma'] = np.nan
+        df['volume_ratio'] = np.nan
+        df['volume_increasing'] = False
+        df['volume_decreasing_trend'] = False
     
     # Ichimoku Cloud
     ichimoku = ta.trend.IchimokuIndicator(
@@ -152,6 +161,8 @@ def apply_technical_indicators(df):
 def identify_key_levels(df):
     # Encontrar soportes recientes
     recent_df = df.iloc[-100:]  # Analizar últimas 100 velas
+    print (f"Analizando soportes y resistencias en las últimas {len(recent_df)} velas")
+    print (recent_df)
     supports = []
     resistances = []
     
@@ -253,22 +264,34 @@ def analyze_signals(df, key_levels=None):
         explanations.append("Precio por encima de banda superior de Bollinger (posible sobrecompra)")
     
     # Señal por volumen
-    if last_row['volume_ratio'] > VOLUME_THRESHOLD:
+    if isinstance(last_row['volume_ratio'], (float, np.float64, np.float32, int, np.int64, np.int32)):
+        volume_ratio_check = last_row['volume_ratio'] > VOLUME_THRESHOLD
+    else:
+        volume_ratio_check = last_row['volume_ratio'] > VOLUME_THRESHOLD if not pd.isna(last_row['volume_ratio']) else False
+    
+    if volume_ratio_check:
         # Confirmar señales si hay alto volumen
         if "LONG" in signals:
             explanations.append(f"Alto volumen ({last_row['volume_ratio']:.2f}x promedio) confirma señal de compra")
         elif "SHORT" in signals:
             explanations.append(f"Alto volumen ({last_row['volume_ratio']:.2f}x promedio) confirma señal de venta")
         # O generar nueva señal basada en ruptura de precio con alto volumen
-        elif last_row['close'] > last_row['close'].shift(1) * 1.01:  # Subida de más del 1%
+        elif isinstance(last_row['close'], pd.Series) and last_row['close'] > last_row['close'].shift(1) * 1.01:  # Subida de más del 1%
             signals.append("LONG")
             explanations.append(f"Ruptura alcista con volumen alto ({last_row['volume_ratio']:.2f}x promedio)")
-        elif last_row['close'] < last_row['close'].shift(1) * 0.99:  # Bajada de más del 1%
+        elif isinstance(last_row['close'], pd.Series) and last_row['close'] < last_row['close'].shift(1) * 0.99:  # Bajada de más del 1%
+            signals.append("SHORT")
+            explanations.append(f"Ruptura bajista con volumen alto ({last_row['volume_ratio']:.2f}x promedio)")
+        # Si close no es una Series, usamos una comparación con el valor anterior (que debería estar disponible)
+        elif not isinstance(last_row['close'], pd.Series) and 'close' in prev_row and last_row['close'] > prev_row['close'] * 1.01:
+            signals.append("LONG")
+            explanations.append(f"Ruptura alcista con volumen alto ({last_row['volume_ratio']:.2f}x promedio)")
+        elif not isinstance(last_row['close'], pd.Series) and 'close' in prev_row and last_row['close'] < prev_row['close'] * 0.99:
             signals.append("SHORT")
             explanations.append(f"Ruptura bajista con volumen alto ({last_row['volume_ratio']:.2f}x promedio)")
     
     #  Alerta de agotamiento por volumen decreciente
-    if last_row['volume_decreasing_trend']:
+    if isinstance(last_row['volume_decreasing_trend'], bool) and last_row['volume_decreasing_trend']:
         if last_row['trend'] == 'BULLISH':
             signals.append("SHORT")
             explanations.append("Volumen decreciente en tendencia alcista (posible agotamiento)")
@@ -388,11 +411,9 @@ def generate_terminal_analysis(symbol, df, signals, explanations, key_levels=Non
                 print(f"  {i}. {price:.2f} USD (testado {touches} veces)")
         else:
             print(f"{Fore.RED}No se identificaron resistencias importantes")
-        #  Mostrar soportes y resistencias dinámicos
-        print(f"\n{Fore.YELLOW}Soportes y resistencias dinámicos:{Style.RESET_ALL}")
+        #  Mostrar soportes y resistencias dinámicas
+        print(f"\n{Fore.YELLOW}Soportes y resistencias dinámicas:{Style.RESET_ALL}")
         if last_row['last_broke_resistance'] is not None and not np.isnan(last_row['last_broke_resistance']):
-            print(f"{Fore.GREEN}• Última resistencia superada (nuevo soporte): {last_row['last_broke_resistance']:.2f}{Style.RESET_ALL}")
-        if last_row['last_broke_support'] is not None and not np.isnan(last_row['last_broke_resistance']):
             print(f"{Fore.GREEN}• Última resistencia superada (nuevo soporte): {last_row['last_broke_resistance']:.2f}{Style.RESET_ALL}")
         if last_row['last_broke_support'] is not None and not np.isnan(last_row['last_broke_support']):
             print(f"{Fore.RED}• Último soporte roto (nueva resistencia): {last_row['last_broke_support']:.2f}{Style.RESET_ALL}")
