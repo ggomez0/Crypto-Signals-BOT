@@ -1,7 +1,6 @@
-from flask import Flask, jsonify, make_response, request
+from flask import Flask, jsonify, request
 from bot import main
 from logger_config import logger
-from api_telegram import send_telegram_alert
 
 app = Flask(__name__)
 
